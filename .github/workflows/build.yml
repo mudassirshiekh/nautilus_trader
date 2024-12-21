@@ -16,7 +16,7 @@ jobs:
     defaults:
       run:
         shell: bash
-    name: build - Python ${{ matrix.python-version }} (${{ matrix.os }})
+    name: Build - Python ${{ matrix.python-version }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     env:
       BUILD_MODE: debug
@@ -49,7 +49,7 @@ jobs:
         options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
 
     steps:
-      - name: Free disk space (Ubuntu)
+      - name: Free disk space
         uses: jlumbroso/free-disk-space@main
         with:
           tool-cache: true
@@ -68,6 +68,151 @@ jobs:
 
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.6
+
+      - name: Set up Rust toolchain
+        run: |
+          rustup toolchain add --profile minimal stable --component clippy,rustfmt
+
+      - name: Set up Python environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Get Python version
+        run: |
+          version=$(bash scripts/python-version.sh)
+          echo "PYTHON_VERSION=$version" >> $GITHUB_ENV
+
+      - name: Get Poetry version from poetry-version
+        run: |
+          version=$(cat poetry-version)
+          echo "POETRY_VERSION=$version" >> $GITHUB_ENV
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: ${{ env.POETRY_VERSION }}
+
+      - name: Install build dependencies
+        run: python -m pip install --upgrade pip setuptools wheel poetry-plugin-export pre-commit
+
+      - name: Cached pre-commit
+        id: cached-pre-commit
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: ${{ runner.os }}-${{ env.PYTHON_VERSION }}-pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      - name: Cached cargo
+        id: cached-cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Cached test data
+        id: cached-testdata-large
+        uses: actions/cache@v4
+        with:
+          path: tests/test_data/large
+          key: ${{ runner.os }}-large-files-${{ hashFiles('tests/test_data/large/checksums.json') }}
+          restore-keys: ${{ runner.os }}-large-files-
+
+      - name: Run pre-commit
+        run: |
+          # pre-commit run --hook-stage manual gitlint-ci
+          pre-commit run --all-files
+
+      - name: Install Nautilus CLI and run init postgres
+        run: |
+          make install-cli
+          nautilus database init --schema ${{ github.workspace }}/schema
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_USERNAME: postgres
+          POSTGRES_PASSWORD: pass
+          POSTGRES_DATABASE: nautilus
+
+      - name: Run nautilus_core cargo tests (Linux)
+        run: |
+          if ! command -v cargo-nextest &> /dev/null
+          then
+              echo "cargo-nextest not found, installing..."
+              cargo install cargo-nextest
+          else
+              echo "cargo-nextest is already installed"
+          fi
+          make cargo-test
+
+      - name: Build Python wheel
+        run: |
+          poetry build --format wheel
+          ls -lh dist/
+
+      - name: Log wheel digest
+        run: |
+          echo "sha256:"
+          sha256sum dist/*.whl
+
+      - name: Install Python wheel
+        run: |
+          poetry export --with test --all-extras --format requirements.txt --output requirements-test.txt
+          python -m pip install -r requirements-test.txt
+          pip install "$(ls dist/*.whl)"
+
+      - name: Run tests
+        run: |
+          pytest --ignore=tests/performance_tests --new-first --failed-first
+          make test-examples
+
+      # Run codspeed for latest python-version only
+      - name: Run benchmarks
+        if: ${{ matrix.python-version == '3.12' }}
+        uses: CodSpeedHQ/action@v3
+        with:
+          token: ${{ secrets.CODSPEED_TOKEN }}
+          run: pytest tests/performance_tests --benchmark-disable-gc --codspeed
+
+  build-macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest]
+        python-version: ["3.11", "3.12"]
+    defaults:
+      run:
+        shell: bash
+    name: Build - Python ${{ matrix.python-version }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    env:
+      BUILD_MODE: debug
+      RUST_BACKTRACE: 1
+      # https://github.com/Mozilla-Actions/sccache-action
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_CACHE_MULTIARCH: 1
+      RUSTC_WRAPPER: "sccache"
+      CC: "sccache clang"
+      CXX: "sccache clang"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.6
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf ~/Library/Caches/*
+          sudo rm -rf ~/Library/Developer/Xcode/DerivedData/*
+          sudo rm -rf /Library/Developer/CommandLineTools
 
       - name: Set up Rust toolchain
         run: |
@@ -139,18 +284,7 @@ jobs:
           # pre-commit run --hook-stage manual gitlint-ci
           pre-commit run --all-files
 
-      - name: Install Nautilus CLI and run init postgres
-        run: |
-          make install-cli
-          nautilus database init --schema ${{ github.workspace }}/schema
-        env:
-          POSTGRES_HOST: localhost
-          POSTGRES_PORT: 5432
-          POSTGRES_USERNAME: postgres
-          POSTGRES_PASSWORD: pass
-          POSTGRES_DATABASE: nautilus
-
-      - name: Run nautilus_core cargo tests (Linux)
+      - name: Run nautilus_core cargo tests
         run: |
           if ! command -v cargo-nextest &> /dev/null
           then
@@ -162,7 +296,14 @@ jobs:
           make cargo-test
 
       - name: Build Python wheel
-        run: poetry build --format wheel
+        run: |
+          poetry build --format wheel
+          ls -lh dist/
+
+      - name: Log wheel digest
+        run: |
+          echo "sha256:"
+          sha256sum dist/*.whl
 
       - name: Install Python wheel
         run: |
@@ -170,249 +311,121 @@ jobs:
           python -m pip install -r requirements-test.txt
           pip install "$(ls dist/*.whl)"
 
-      - name: Run tests (Linux)
+      - name: Run tests
         run: |
           pytest --ignore=tests/performance_tests --new-first --failed-first
           make test-examples
 
-      # Run codspeed for latest python-version only
-      - name: Run benchmarks (Linux)
-        if: ${{ matrix.python-version == '3.12' }}
-        uses: CodSpeedHQ/action@v3
-        with:
-          token: ${{ secrets.CODSPEED_TOKEN }}
-          run: pytest tests/performance_tests --benchmark-disable-gc --codspeed
+  build-windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest]
+        python-version: ["3.11", "3.12"]
+    defaults:
+      run:
+        shell: bash
+    name: Build - Python ${{ matrix.python-version }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    env:
+      BUILD_MODE: debug
+      RUST_BACKTRACE: 1
+      # https://github.com/Mozilla-Actions/sccache-action
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_CACHE_MULTIARCH: 1
 
-  # build-windows:
-  #   strategy:
-  #     fail-fast: false
-  #     matrix:
-  #       os: [windows-latest]
-  #       python-version: ["3.11", "3.12"]
-  #   defaults:
-  #     run:
-  #       shell: bash
-  #   name: build - Python ${{ matrix.python-version }} (${{ matrix.os }})
-  #   runs-on: ${{ matrix.os }}
-  #   env:
-  #     BUILD_MODE: debug
-  #     RUST_BACKTRACE: 1
-  #     # https://github.com/Mozilla-Actions/sccache-action
-  #     SCCACHE_GHA_ENABLED: "true"
-  #     SCCACHE_CACHE_MULTIARCH: 1
-  #
-  #   steps:
-  #     - name: Checkout repository
-  #       uses: actions/checkout@v4
-  #
-  #     - name: Run sccache-cache
-  #       uses: mozilla-actions/sccache-action@v0.0.6
-  #
-  #     - name: Set sccache-cache env vars (Windows)
-  #       run: |
-  #         echo RUSTC_WRAPPER="${{ env.SCCACHE_PATH }}" >> $GITHUB_ENV
-  #         echo CMAKE_C_COMPILER_LAUNCHER="${{ env.SCCACHE_PATH }}" >> $GITHUB_ENV
-  #         echo CMAKE_CXX_COMPILER_LAUNCHER="${{ env.SCCACHE_PATH }}" >> $GITHUB_ENV
-  #
-  #     - name: Free disk space (Windows)
-  #       run: |
-  #         rm -rf "/c/Program Files/dotnet"
-  #         rm -rf "/c/Program Files (x86)/Microsoft Visual Studio/2019"
-  #
-  #     - name: Set up Rust toolchain
-  #       run: |
-  #         rustup toolchain add --profile minimal stable --component clippy,rustfmt
-  #
-  #     - name: Set up Python environment
-  #       uses: actions/setup-python@v5
-  #       with:
-  #         python-version: ${{ matrix.python-version }}
-  #
-  #     - name: Get Python version
-  #       run: |
-  #         version=$(bash scripts/python-version.sh)
-  #         echo "PYTHON_VERSION=$version" >> $GITHUB_ENV
-  #
-  #     - name: Get Poetry version from poetry-version
-  #       run: |
-  #         version=$(cat poetry-version)
-  #         echo "POETRY_VERSION=$version" >> $GITHUB_ENV
-  #
-  #     - name: Install Poetry
-  #       uses: snok/install-poetry@v1
-  #       with:
-  #         version: ${{ env.POETRY_VERSION }}
-  #
-  #     - name: Install build dependencies
-  #       run: python -m pip install --upgrade pip setuptools wheel pre-commit
-  #
-  #     - name: Cached pre-commit
-  #       id: cached-pre-commit
-  #       uses: actions/cache@v4
-  #       with:
-  #         path: ~/.cache/pre-commit
-  #         key: ${{ runner.os }}-${{ env.PYTHON_VERSION }}-pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
-  #
-  #     - name: Cached cargo
-  #       id: cached-cargo
-  #       uses: actions/cache@v4
-  #       with:
-  #         path: |
-  #           ~/.cargo/bin/
-  #           ~/.cargo/registry/index/
-  #           ~/.cargo/registry/cache/
-  #           ~/.cargo/git/db/
-  #           target/
-  #         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-  #         restore-keys: ${{ runner.os }}-cargo-
-  #
-  #     - name: Set poetry cache-dir
-  #       run: echo "POETRY_CACHE_DIR=$(poetry config cache-dir)" >> $GITHUB_ENV
-  #
-  #     - name: Cached poetry
-  #       id: cached-poetry
-  #       uses: actions/cache@v4
-  #       with:
-  #         path: ${{ env.POETRY_CACHE_DIR }}
-  #         key: ${{ runner.os }}-${{ env.PYTHON_VERSION }}-poetry-${{ hashFiles('**/poetry.lock') }}
-  #
-  #     - name: Cached test data
-  #       id: cached-testdata-large
-  #       uses: actions/cache@v4
-  #       with:
-  #         path: tests/test_data/large
-  #         key: ${{ runner.os }}-large-files-${{ hashFiles('tests/test_data/large/checksums.json') }}
-  #         restore-keys: ${{ runner.os }}-large-files-
-  #
-  #     - name: Run pre-commit
-  #       run: |
-  #         # pre-commit run --hook-stage manual gitlint-ci
-  #         pre-commit run --all-files
-  #
-  #     # Run tests without parallel build (avoids linker errors)
-  #     - name: Run tests (Windows)
-  #       run: |
-  #         poetry install --with test --all-extras
-  #         poetry run pytest --ignore=tests/performance_tests --new-first --failed-first
-  #       env:
-  #         PARALLEL_BUILD: false
-  #
-  # build-macos:
-  #   strategy:
-  #     fail-fast: false
-  #     matrix:
-  #       os: [macos-latest]
-  #       python-version: ["3.11", "3.12"]
-  #   defaults:
-  #     run:
-  #       shell: bash
-  #   name: build - Python ${{ matrix.python-version }} (${{ matrix.os }})
-  #   runs-on: ${{ matrix.os }}
-  #   env:
-  #     BUILD_MODE: debug
-  #     RUST_BACKTRACE: 1
-  #     # https://github.com/Mozilla-Actions/sccache-action
-  #     SCCACHE_GHA_ENABLED: "true"
-  #     SCCACHE_CACHE_MULTIARCH: 1
-  #     RUSTC_WRAPPER: "sccache"
-  #     CC: "sccache clang"
-  #     CXX: "sccache clang"
-  #
-  #   steps:
-  #     - name: Checkout repository
-  #       uses: actions/checkout@v4
-  #
-  #     - name: Run sccache-cache
-  #       uses: mozilla-actions/sccache-action@v0.0.6
-  #
-  #     - name: Free disk space (macOS)
-  #       run: |
-  #         sudo rm -rf ~/Library/Caches/*
-  #         sudo rm -rf ~/Library/Developer/Xcode/DerivedData/*
-  #         sudo rm -rf /Library/Developer/CommandLineTools
-  #
-  #     - name: Set up Rust toolchain
-  #       run: |
-  #         rustup toolchain add --profile minimal stable --component clippy,rustfmt
-  #
-  #     - name: Set up Python environment
-  #       uses: actions/setup-python@v5
-  #       with:
-  #         python-version: ${{ matrix.python-version }}
-  #
-  #     - name: Get Python version
-  #       run: |
-  #         version=$(bash scripts/python-version.sh)
-  #         echo "PYTHON_VERSION=$version" >> $GITHUB_ENV
-  #
-  #     - name: Get Poetry version from poetry-version
-  #       run: |
-  #         version=$(cat poetry-version)
-  #         echo "POETRY_VERSION=$version" >> $GITHUB_ENV
-  #
-  #     - name: Install Poetry
-  #       uses: snok/install-poetry@v1
-  #       with:
-  #         version: ${{ env.POETRY_VERSION }}
-  #
-  #     - name: Install build dependencies
-  #       run: python -m pip install --upgrade pip setuptools wheel pre-commit
-  #
-  #     - name: Cached pre-commit
-  #       id: cached-pre-commit
-  #       uses: actions/cache@v4
-  #       with:
-  #         path: ~/.cache/pre-commit
-  #         key: ${{ runner.os }}-${{ env.PYTHON_VERSION }}-pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
-  #
-  #     - name: Cached cargo
-  #       id: cached-cargo
-  #       uses: actions/cache@v4
-  #       with:
-  #         path: |
-  #           ~/.cargo/bin/
-  #           ~/.cargo/registry/index/
-  #           ~/.cargo/registry/cache/
-  #           ~/.cargo/git/db/
-  #           target/
-  #         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-  #         restore-keys: ${{ runner.os }}-cargo-
-  #
-  #     - name: Set poetry cache-dir
-  #       run: echo "POETRY_CACHE_DIR=$(poetry config cache-dir)" >> $GITHUB_ENV
-  #
-  #     - name: Cached poetry
-  #       id: cached-poetry
-  #       uses: actions/cache@v4
-  #       with:
-  #         path: ${{ env.POETRY_CACHE_DIR }}
-  #         key: ${{ runner.os }}-${{ env.PYTHON_VERSION }}-poetry-${{ hashFiles('**/poetry.lock') }}
-  #
-  #     - name: Cached test data
-  #       id: cached-testdata-large
-  #       uses: actions/cache@v4
-  #       with:
-  #         path: tests/test_data/large
-  #         key: ${{ runner.os }}-large-files-${{ hashFiles('tests/test_data/large/checksums.json') }}
-  #         restore-keys: ${{ runner.os }}-large-files-
-  #
-  #     - name: Run pre-commit
-  #       run: |
-  #         # pre-commit run --hook-stage manual gitlint-ci
-  #         pre-commit run --all-files
-  #
-  #     - name: Run nautilus_core cargo tests (macOS)
-  #       run: |
-  #         if ! command -v cargo-nextest &> /dev/null
-  #         then
-  #             echo "cargo-nextest not found, installing..."
-  #             cargo install cargo-nextest
-  #         else
-  #             echo "cargo-nextest is already installed"
-  #         fi
-  #         make cargo-test
-  #
-  #     - name: Run tests (macOS)
-  #       run: |
-  #         make pytest
-  #         make test-examples
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.6
+
+      - name: Set sccache-cache env vars
+        run: |
+          echo RUSTC_WRAPPER="${{ env.SCCACHE_PATH }}" >> $GITHUB_ENV
+          echo CMAKE_C_COMPILER_LAUNCHER="${{ env.SCCACHE_PATH }}" >> $GITHUB_ENV
+          echo CMAKE_CXX_COMPILER_LAUNCHER="${{ env.SCCACHE_PATH }}" >> $GITHUB_ENV
+
+      - name: Free disk space
+        run: |
+          rm -rf "/c/Program Files/dotnet"
+          rm -rf "/c/Program Files (x86)/Microsoft Visual Studio/2019"
+
+      - name: Set up Rust toolchain
+        run: |
+          rustup toolchain add --profile minimal stable --component clippy,rustfmt
+
+      - name: Set up Python environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Get Python version
+        run: |
+          version=$(bash scripts/python-version.sh)
+          echo "PYTHON_VERSION=$version" >> $GITHUB_ENV
+
+      - name: Get Poetry version from poetry-version
+        run: |
+          version=$(cat poetry-version)
+          echo "POETRY_VERSION=$version" >> $GITHUB_ENV
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: ${{ env.POETRY_VERSION }}
+
+      - name: Install build dependencies
+        run: python -m pip install --upgrade pip setuptools wheel pre-commit
+
+      - name: Cached pre-commit
+        id: cached-pre-commit
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: ${{ runner.os }}-${{ env.PYTHON_VERSION }}-pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      - name: Cached cargo
+        id: cached-cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Set poetry cache-dir
+        run: echo "POETRY_CACHE_DIR=$(poetry config cache-dir)" >> $GITHUB_ENV
+
+      - name: Cached poetry
+        id: cached-poetry
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.POETRY_CACHE_DIR }}
+          key: ${{ runner.os }}-${{ env.PYTHON_VERSION }}-poetry-${{ hashFiles('**/poetry.lock') }}
+
+      - name: Cached test data
+        id: cached-testdata-large
+        uses: actions/cache@v4
+        with:
+          path: tests/test_data/large
+          key: ${{ runner.os }}-large-files-${{ hashFiles('tests/test_data/large/checksums.json') }}
+          restore-keys: ${{ runner.os }}-large-files-
+
+      - name: Run pre-commit
+        run: |
+          # pre-commit run --hook-stage manual gitlint-ci
+          pre-commit run --all-files
+
+      # Run tests without parallel build (avoids linker errors)
+      - name: Run tests
+        run: |
+          poetry install --with test --all-extras
+          poetry run pytest --ignore=tests/performance_tests --new-first --failed-first
+        env:
+          PARALLEL_BUILD: false
