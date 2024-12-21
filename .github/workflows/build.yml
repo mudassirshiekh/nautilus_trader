@@ -303,7 +303,7 @@ jobs:
       - name: Log wheel digest
         run: |
           echo "sha256:"
-          sha256sum dist/*.whl
+          shasum -a 256 dist/*.whl
 
       - name: Install Python wheel
         run: |
