@@ -141,9 +141,17 @@ jobs:
           POSTGRES_DATABASE: nautilus
 
       - name: Install cargo-nextest
-        run: ~/.cargo/bin/cargo install cargo-nextest
+        run: |
+          if ! command -v cargo-nextest &> /dev/null
+          then
+              echo "cargo-nextest not found, installing..."
+             ~/.cargo/bin/cargo install cargo-nextest
+          else
+              echo "cargo-nextest is already installed"
+          fi
+          make cargo-test
 
-      - name: Run nautilus_core cargo tests
+      - name: Run nautilus_core tests
         run: make cargo-test
 
       - name: Update version in pyproject.toml
@@ -310,9 +318,17 @@ jobs:
           pre-commit run --all-files
 
       - name: Install cargo-nextest
-        run: ~/.cargo/bin/cargo install cargo-nextest
+        run: |
+          if ! command -v cargo-nextest &> /dev/null
+          then
+              echo "cargo-nextest not found, installing..."
+             ~/.cargo/bin/cargo install cargo-nextest
+          else
+              echo "cargo-nextest is already installed"
+          fi
+          make cargo-test
 
-      - name: Run nautilus_core cargo tests
+      - name: Run nautilus_core tests
         run: make cargo-test
 
       - name: Update version in pyproject.toml
