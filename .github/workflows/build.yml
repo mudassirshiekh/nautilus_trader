@@ -572,7 +572,7 @@ jobs:
       - name: Remove old wheels from Cloudflare R2
         run: |
           set -euo pipefail
-          echo "Cleaning up old wheels in Cloudflare R2..."
+          echo "Cleaning up old dev wheels in Cloudflare R2..."
 
           files=$(aws s3 ls "s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/" --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }} | awk '{print $4}')
           if [ -z "$files" ]; then
@@ -593,23 +593,31 @@ jobs:
 
               echo "Processing: $file"
 
-              # Extract the platform-specific part (everything after the version number)
-              platform=$(echo "$file" | sed -E 's/.*\+[0-9]+-(.+)\.whl/\1/')
+              # Check if the file is a .dev wheel
+              if [[ "$file" != *".dev"* ]]; then
+                  echo "Skipping non-.dev wheel: $file"
+                  continue
+              fi
 
-              # Extract the base name and version without build number
-              base=$(echo "$file" | sed -E "s/(.+)-[0-9]+\.[0-9]+\.[0-9]+\.dev[0-9]+\+[0-9]+-${platform}\.whl/\1/")
+              # Extract the base name, platform, and version suffix
+              base=$(echo "$file" | sed -E "s/^(.+)-[0-9]+\.[0-9]+\.[0-9]+\.dev[0-9]+\+[0-9]+-(.+)\.whl/\1/")
+              platform=$(echo "$file" | sed -E "s/^.+-([0-9]+\.[0-9]+\.[0-9]+\.dev[0-9]+\+[0-9]+)-(.+)\.whl/\2/")
 
-              # Find latest version for this base+platform combination
-              latest=$(echo "$files" | grep "${base}.*${platform}\.whl$" | sort -r | head -n 1)
+              echo "Base: $base, Platform: $platform"
+
+              # Find the latest .dev wheel for this base and platform
+              latest=$(echo "$files" | grep "^${base}-" | grep ".dev" | grep "${platform}\.whl$" | sort -V | tail -n 1)
+
+              echo "Latest .dev wheel for $base-$platform: $latest"
 
               if [[ "$file" != "$latest" ]]; then
-                  echo "Deleting old wheel: $file"
+                  echo "Deleting old .dev wheel: $file"
                   aws s3 rm "s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/$file" --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }}
               else
-                  echo "Keeping latest wheel: $file"
+                  echo "Keeping latest .dev wheel: $file"
               fi
           done
-          echo "Old wheels cleanup completed"
+          echo "Dev wheels cleanup completed"
 
       - name: Generate index.html for Cloudflare R2
         run: |
