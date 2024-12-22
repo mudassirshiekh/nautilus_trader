@@ -531,11 +531,15 @@ jobs:
           set -euo pipefail
           echo "Uploading new wheels to Cloudflare R2..."
 
+          echo "Initial dist/ contents:"
+          ls -la dist/
+          find dist/ -type f -name "*.whl" -ls
+
           # Create clean directory for real files
           mkdir -p dist/all
 
           # Copy all files into dist/all/ to resolve symlinks
-          find dist/ -type l -name "*.whl" -exec cp --dereference {} dist/all/ \;
+          find dist/ -type f -name "*.whl" -exec cp -L {} dist/all/ \;
 
           # First check for any wheels
           if ! find dist/all/ -type f -name "*.whl" >/dev/null 2>&1; then
