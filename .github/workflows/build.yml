@@ -7,6 +7,59 @@ on:
     branches: [develop]
 
 jobs:
+  pre-commit:
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64]
+        os: [ubuntu-latest]
+        python-version: ["3.11", "3.12"]
+    name: pre-commit - python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        run: |
+          rustup toolchain add --profile minimal stable --component clippy,rustfmt
+
+      - name: Set up Python environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Get Python version
+        run: |
+          version=$(bash scripts/python-version.sh)
+          echo "PYTHON_VERSION=$version" >> $GITHUB_ENV
+
+      - name: Get Poetry version from poetry-version
+        run: |
+          version=$(cat poetry-version)
+          echo "POETRY_VERSION=$version" >> $GITHUB_ENV
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: ${{ env.POETRY_VERSION }}
+
+      - name: Install build dependencies
+        run: python -m pip install --upgrade pip setuptools wheel poetry-plugin-export pre-commit
+
+      - name: Cached pre-commit
+        id: cached-pre-commit
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: ${{ runner.os }}-${{ env.PYTHON_VERSION }}-pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      - name: Run pre-commit
+        run: |
+          # pre-commit run --hook-stage manual gitlint-ci
+          pre-commit run --all-files
+
   build-linux:
     strategy:
       fail-fast: false
@@ -18,6 +71,7 @@ jobs:
         shell: bash
     name: build - python ${{ matrix.python-version }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    needs: [pre-commit]
     env:
       BUILD_MODE: release
       RUST_BACKTRACE: 1
@@ -49,7 +103,7 @@ jobs:
         options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
 
     steps:
-      # - name: Free disk space  # TODO!
+      # - name: Free disk space  # Continue to monitor
       #   uses: jlumbroso/free-disk-space@main
       #   with:
       #     tool-cache: true
@@ -96,13 +150,6 @@ jobs:
       - name: Install build dependencies
         run: python -m pip install --upgrade pip setuptools wheel poetry-plugin-export pre-commit
 
-      # - name: Cached pre-commit  # TODO!
-      #   id: cached-pre-commit
-      #   uses: actions/cache@v4
-      #   with:
-      #     path: ~/.cache/pre-commit
-      #     key: ${{ runner.os }}-${{ env.PYTHON_VERSION }}-pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
-      #
       - name: Cached cargo
         id: cached-cargo
         uses: actions/cache@v4
@@ -133,29 +180,24 @@ jobs:
           key: ${{ runner.os }}-large-files-${{ hashFiles('tests/test_data/large/checksums.json') }}
           restore-keys: ${{ runner.os }}-large-files-
 
-      # - name: Run pre-commit  # TODO!
-      #   run: |
-      #     # pre-commit run --hook-stage manual gitlint-ci
-      #     pre-commit run --all-files
-      #
-      # - name: Install Nautilus CLI and run init postgres
-      #   run: |
-      #     make install-cli
-      #     nautilus database init --schema ${{ github.workspace }}/schema
-      #   env:
-      #     POSTGRES_HOST: localhost
-      #     POSTGRES_PORT: 5432
-      #     POSTGRES_USERNAME: postgres
-      #     POSTGRES_PASSWORD: pass
-      #     POSTGRES_DATABASE: nautilus
-      #
-      # - name: Install cargo-nextest
-      #   uses: taiki-e/install-action@v2
-      #   with:
-      #     tool: nextest
-      #
-      # - name: Run nautilus_core tests
-      #   run: make cargo-test
+      - name: Install Nautilus CLI and run init postgres
+        run: |
+          make install-cli
+          nautilus database init --schema ${{ github.workspace }}/schema
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_USERNAME: postgres
+          POSTGRES_PASSWORD: pass
+          POSTGRES_DATABASE: nautilus
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+
+      - name: Run nautilus_core tests
+        run: make cargo-test
 
       - name: Update version in pyproject.toml
         run: |
@@ -224,6 +266,7 @@ jobs:
         shell: bash
     name: build - python ${{ matrix.python-version }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    needs: [pre-commit]
     env:
       BUILD_MODE: release
       RUST_BACKTRACE: 1
@@ -241,7 +284,7 @@ jobs:
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.6
 
-      # - name: Free disk space  # TODO!
+      # - name: Free disk space  # Continue to monitor
       #   run: |
       #     sudo rm -rf ~/Library/Caches/*
       #     sudo rm -rf ~/Library/Developer/Xcode/DerivedData/*
@@ -274,13 +317,6 @@ jobs:
       - name: Install build dependencies
         run: python -m pip install --upgrade pip setuptools wheel poetry-plugin-export pre-commit
 
-      # - name: Cached pre-commit  # TODO!
-      #   id: cached-pre-commit
-      #   uses: actions/cache@v4
-      #   with:
-      #     path: ~/.cache/pre-commit
-      #     key: ${{ runner.os }}-${{ env.PYTHON_VERSION }}-pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
-
       - name: Cached cargo
         id: cached-cargo
         uses: actions/cache@v4
@@ -311,11 +347,6 @@ jobs:
           path: tests/test_data/large
           key: ${{ runner.os }}-large-files-${{ hashFiles('tests/test_data/large/checksums.json') }}
           restore-keys: ${{ runner.os }}-large-files-
-
-      # - name: Run pre-commit  # TODO!
-      #   run: |
-      #     # pre-commit run --hook-stage manual gitlint-ci
-      #     pre-commit run --all-files
 
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
@@ -384,6 +415,7 @@ jobs:
         shell: bash
     name: build - python ${{ matrix.python-version }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    needs: [pre-commit]
     env:
       BUILD_MODE: debug  # Not building wheels, so debug is fine
       RUST_BACKTRACE: 1
@@ -404,7 +436,7 @@ jobs:
           echo CMAKE_C_COMPILER_LAUNCHER="${{ env.SCCACHE_PATH }}" >> $GITHUB_ENV
           echo CMAKE_CXX_COMPILER_LAUNCHER="${{ env.SCCACHE_PATH }}" >> $GITHUB_ENV
 
-      # - name: Free disk space  # TODO!
+      # - name: Free disk space  # Continue to monitor
       #   run: |
       #     rm -rf "/c/Program Files/dotnet"
       #     rm -rf "/c/Program Files (x86)/Microsoft Visual Studio/2019"
@@ -655,7 +687,7 @@ jobs:
             echo "index.html not found in R2 bucket"
             exit 1
           fi
-          echo "Verification completed successfully."
+          echo "Verification completed successfully"
 
       - name: Clean up local artifacts
         run: |
@@ -670,13 +702,30 @@ jobs:
           set -euo pipefail
           echo "Fetching artifact IDs for the current run..."
 
+          # Fetch artifact data
           response=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
           -H "Accept: application/vnd.github+json" \
           https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts)
-          echo "$response" > artifacts.json
-          ids=$(jq -r '.artifacts[].id' artifacts.json)
-          echo "ARTIFACT_IDS=$ids" >> $GITHUB_ENV
-          echo "Artifact IDs fetched successfully"
+
+          # Debug API response
+          echo "API Response: $response" > api_response.json
+          jq . api_response.json  # Pretty-print for debugging
+
+          # Extract artifact IDs
+          ids=$(echo "$response" | jq -r '.artifacts[].id')
+
+          # Debug extracted IDs
+          echo "Extracted Artifact IDs: $ids"
+
+          # Write IDs to environment variable (ensure proper formatting)
+          if [ -n "$ids" ]; then
+            ids=$(echo "$ids" | tr '\n' ' ')  # Ensure single-line space-separated IDs
+            echo "ARTIFACT_IDS=$ids" >> $GITHUB_ENV
+            echo "Artifact IDs written successfully: $ids"
+          else
+            echo "No artifact IDs found"
+            exit 1
+          fi
 
       - name: Delete artifacts for current run
         if: success()
@@ -684,11 +733,28 @@ jobs:
           set -euo pipefail
           echo "Deleting artifacts for the current run..."
 
-          for id in ${{ env.ARTIFACT_IDS }}; do
-            echo "Deleting artifact ID: $id"
-            curl -X DELETE -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/${{ github.repository }}/actions/artifacts/$id
-            echo "Deleted artifact $id"
+          # Ensure ARTIFACT_IDS is not empty
+          if [ -z "${ARTIFACT_IDS:-}" ]; then
+              echo "No artifact IDs found to delete"
+              exit 0
+          fi
+
+          # Debug: Log the artifact IDs to be deleted
+          echo "Artifact IDs to delete: $ARTIFACT_IDS"
+
+          # Loop through the artifact IDs and delete each one
+          for id in $ARTIFACT_IDS; do
+              echo "Deleting artifact ID: $id"
+
+              # Attempt to delete the artifact and handle errors
+              if ! curl -X DELETE -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                -H "Accept: application/vnd.github+json" \
+                https://api.github.com/repos/${{ github.repository }}/actions/artifacts/$id; then
+                  echo "Error: Failed to delete artifact ID: $id"
+              else
+                  echo "Successfully deleted artifact ID: $id"
+              fi
           done
-          echo "Artifacts deleted successfully"
+
+          echo "Artifact deletion process completed"
+
