@@ -567,7 +567,8 @@ jobs:
 
             echo "Uploading $file..."
             if ! aws s3 cp "$file" "s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/" \
-              --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }}; then
+              --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }} \
+              --content-type "application/zip"; then
               echo "Failed to upload $file"
               exit 1
             fi
@@ -597,8 +598,16 @@ jobs:
 
           # Process each file
           for file in $files; do
+              if [[ "$file" == "index.html" ]]; then
+                  echo "Skipping index.html"
+                  continue
+              fi
+
+              echo "Processing: $file"
+
               # Extract the platform-specific part (everything after the version number)
               platform=$(echo "$file" | sed -E 's/.*\+[0-9]+-(.+)\.whl/\1/')
+
               # Extract the base name and version without build number
               base=$(echo "$file" | sed -E "s/(.+)-[0-9]+\.[0-9]+\.[0-9]+\.dev[0-9]+\+[0-9]+-${platform}\.whl/\1/")
 
