@@ -141,15 +141,9 @@ jobs:
           POSTGRES_DATABASE: nautilus
 
       - name: Install cargo-nextest
-        run: |
-          if ! command -v cargo-nextest &> /dev/null
-          then
-              echo "cargo-nextest not found, installing..."
-             ~/.cargo/bin/cargo install cargo-nextest
-          else
-              echo "cargo-nextest is already installed"
-          fi
-          make cargo-test
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
 
       - name: Run nautilus_core tests
         run: make cargo-test
@@ -318,15 +312,9 @@ jobs:
           pre-commit run --all-files
 
       - name: Install cargo-nextest
-        run: |
-          if ! command -v cargo-nextest &> /dev/null
-          then
-              echo "cargo-nextest not found, installing..."
-             ~/.cargo/bin/cargo install cargo-nextest
-          else
-              echo "cargo-nextest is already installed"
-          fi
-          make cargo-test
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
 
       - name: Run nautilus_core tests
         run: make cargo-test
