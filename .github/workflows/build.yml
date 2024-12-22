@@ -531,20 +531,23 @@ jobs:
           set -euo pipefail
           echo "Uploading new wheels to Cloudflare R2..."
 
-          # Copy all files into dist/ to resolve symlinks
-          find dist/ -type l -name "*.whl" -exec cp --dereference {} dist/ \;
+          # Create clean directory for real files
+          mkdir -p dist/all
+
+          # Copy all files into dist/all/ to resolve symlinks
+          find dist/ -type l -name "*.whl" -exec cp --dereference {} dist/all/ \;
 
           # First check for any wheels
-          if ! find dist/ -type f -name "*.whl" >/dev/null 2>&1; then
-            echo "No wheels found in dist/, exiting"
+          if ! find dist/all/ -type f -name "*.whl" >/dev/null 2>&1; then
+            echo "No wheels found in dist/all/, exiting"
             exit 1
           fi
 
-          echo "Contents of dist/:"
-          ls -la dist/
+          echo "Contents of dist/all/:"
+          ls -la dist/all/
 
           wheel_count=0
-          for file in dist/*.whl; do
+          for file in dist/all/*.whl; do
             echo "File details for $file:"
             ls -l "$file"
             file "$file"
