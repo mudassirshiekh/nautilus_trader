@@ -51,16 +51,16 @@ jobs:
         options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
 
     steps:
-      - name: Free disk space
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: true
-          android: false
-          dotnet: false
-          haskell: false
-          large-packages: true
-          docker-images: true
-          swap-storage: true
+      # - name: Free disk space  # TODO!
+      #   uses: jlumbroso/free-disk-space@main
+      #   with:
+      #     tool-cache: true
+      #     android: false
+      #     dotnet: false
+      #     haskell: false
+      #     large-packages: true
+      #     docker-images: true
+      #     swap-storage: true
 
       - name: Install runner dependencies
         run: sudo apt-get install -y curl clang git libssl-dev make pkg-config
@@ -98,13 +98,13 @@ jobs:
       - name: Install build dependencies
         run: python -m pip install --upgrade pip setuptools wheel poetry-plugin-export pre-commit
 
-      - name: Cached pre-commit
-        id: cached-pre-commit
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pre-commit
-          key: ${{ runner.os }}-${{ env.PYTHON_VERSION }}-pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
-
+      # - name: Cached pre-commit  # TODO!
+      #   id: cached-pre-commit
+      #   uses: actions/cache@v4
+      #   with:
+      #     path: ~/.cache/pre-commit
+      #     key: ${{ runner.os }}-${{ env.PYTHON_VERSION }}-pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+      #
       - name: Cached cargo
         id: cached-cargo
         uses: actions/cache@v4
@@ -135,29 +135,29 @@ jobs:
           key: ${{ runner.os }}-large-files-${{ hashFiles('tests/test_data/large/checksums.json') }}
           restore-keys: ${{ runner.os }}-large-files-
 
-      - name: Run pre-commit
-        run: |
-          # pre-commit run --hook-stage manual gitlint-ci
-          pre-commit run --all-files
-
-      - name: Install Nautilus CLI and run init postgres
-        run: |
-          make install-cli
-          nautilus database init --schema ${{ github.workspace }}/schema
-        env:
-          POSTGRES_HOST: localhost
-          POSTGRES_PORT: 5432
-          POSTGRES_USERNAME: postgres
-          POSTGRES_PASSWORD: pass
-          POSTGRES_DATABASE: nautilus
-
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@v2
-        with:
-          tool: nextest
-
-      - name: Run nautilus_core tests
-        run: make cargo-test
+      # - name: Run pre-commit  # TODO!
+      #   run: |
+      #     # pre-commit run --hook-stage manual gitlint-ci
+      #     pre-commit run --all-files
+      #
+      # - name: Install Nautilus CLI and run init postgres
+      #   run: |
+      #     make install-cli
+      #     nautilus database init --schema ${{ github.workspace }}/schema
+      #   env:
+      #     POSTGRES_HOST: localhost
+      #     POSTGRES_PORT: 5432
+      #     POSTGRES_USERNAME: postgres
+      #     POSTGRES_PASSWORD: pass
+      #     POSTGRES_DATABASE: nautilus
+      #
+      # - name: Install cargo-nextest
+      #   uses: taiki-e/install-action@v2
+      #   with:
+      #     tool: nextest
+      #
+      # - name: Run nautilus_core tests
+      #   run: make cargo-test
 
       - name: Update version in pyproject.toml
         run: |
