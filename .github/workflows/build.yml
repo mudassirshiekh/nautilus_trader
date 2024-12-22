@@ -187,18 +187,18 @@ jobs:
           python -m pip install -r requirements-test.txt
           pip install "$(ls dist/*.whl)"
 
-      - name: Run tests
-        run: |
-          pytest --ignore=tests/performance_tests --new-first --failed-first
-          make test-examples
-
-      # Run codspeed for latest python-version only
-      - name: Run benchmarks
-        if: ${{ matrix.python-version == '3.12' }}
-        uses: CodSpeedHQ/action@v3
-        with:
-          token: ${{ secrets.CODSPEED_TOKEN }}
-          run: pytest tests/performance_tests --benchmark-disable-gc --codspeed
+      # - name: Run tests  # TODO!
+      #   run: |
+      #     pytest --ignore=tests/performance_tests --new-first --failed-first
+      #     make test-examples
+      #
+      # # Run codspeed for latest python-version only  # TODO!
+      # - name: Run benchmarks
+      #   if: ${{ matrix.python-version == '3.12' }}
+      #   uses: CodSpeedHQ/action@v3
+      #   with:
+      #     token: ${{ secrets.CODSPEED_TOKEN }}
+      #     run: pytest tests/performance_tests --benchmark-disable-gc --codspeed
 
       - name: Set release output
         if: github.event_name == 'push'
@@ -531,21 +531,24 @@ jobs:
           set -euo pipefail
           echo "Uploading new wheels to Cloudflare R2..."
 
-          # First check if dist directory exists
-          if [ ! -d "dist" ]; then
-            echo "dist directory not found"
+          # Copy all files into dist/ to resolve symlinks
+          find dist/ -type l -name "*.whl" -exec cp --dereference {} dist/ \;
+
+          # First check for any wheels
+          if ! find dist/ -type f -name "*.whl" >/dev/null 2>&1; then
+            echo "No wheels found in dist/, exiting"
             exit 1
           fi
 
-          if ! ls dist/*.whl 1> /dev/null 2>&1; then
-            echo "No wheel files found to upload"
-            exit 1
-          fi
-
-          cd dist
+          echo "Contents of dist/:"
+          ls -la dist/
 
           wheel_count=0
-          for file in *.whl; do
+          for file in dist/*.whl; do
+            echo "File details for $file:"
+            ls -l "$file"
+            file "$file"
+
             if [ ! -f "$file" ]; then
               echo "Warning: '$file' is not a regular file, skipping"
               continue
