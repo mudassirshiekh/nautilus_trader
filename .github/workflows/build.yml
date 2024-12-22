@@ -140,16 +140,11 @@ jobs:
           POSTGRES_PASSWORD: pass
           POSTGRES_DATABASE: nautilus
 
+      - name: Install cargo-nextest
+        run: ~/.cargo/bin/cargo install cargo-nextest
+
       - name: Run nautilus_core cargo tests
-        run: |
-          if ! command -v cargo-nextest &> /dev/null
-          then
-              echo "cargo-nextest not found, installing..."
-              cargo install cargo-nextest
-          else
-              echo "cargo-nextest is already installed"
-          fi
-          make cargo-test
+        run: make cargo-test
 
       - name: Update version in pyproject.toml
         run: |
@@ -314,16 +309,11 @@ jobs:
           # pre-commit run --hook-stage manual gitlint-ci
           pre-commit run --all-files
 
+      - name: Install cargo-nextest
+        run: ~/.cargo/bin/cargo install cargo-nextest
+
       - name: Run nautilus_core cargo tests
-        run: |
-          if ! command -v cargo-nextest &> /dev/null
-          then
-              echo "cargo-nextest not found, installing..."
-              cargo install cargo-nextest
-          else
-              echo "cargo-nextest is already installed"
-          fi
-          make cargo-test
+        run: make cargo-test
 
       - name: Update version in pyproject.toml
         run: |
@@ -362,6 +352,19 @@ jobs:
         run: |
           pytest --ignore=tests/performance_tests --new-first --failed-first
           make test-examples
+
+      - name: Set release output
+        id: vars
+        run: |
+          echo "ASSET_PATH=$(find ./dist -mindepth 1 -print -quit)" >> $GITHUB_ENV
+          cd dist
+          echo "ASSET_NAME=$(printf '%s\0' * | awk 'BEGIN{RS="\0"} {print;  exit}')" >> $GITHUB_ENV
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ASSET_NAME }}
+          path: ${{ env.ASSET_PATH }}
 
   build-windows:
     strategy:
