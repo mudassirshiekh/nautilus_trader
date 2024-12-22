@@ -200,6 +200,7 @@ jobs:
           run: pytest tests/performance_tests --benchmark-disable-gc --codspeed
 
       - name: Set release output
+        if: github.event_name == 'push'
         id: vars
         run: |
           echo "ASSET_PATH=$(find ./dist -mindepth 1 -print -quit)" >> $GITHUB_ENV
@@ -359,7 +360,7 @@ jobs:
   #         make test-examples
   #
   #     - name: Set release output
-  #       if: success() && github.event_name == 'push'
+  #       if: github.event_name == 'push'
   #       id: vars
   #       run: |
   #         echo "ASSET_PATH=$(find ./dist -mindepth 1 -print -quit)" >> $GITHUB_ENV
@@ -529,12 +530,26 @@ jobs:
           set -euo pipefail
           echo "Uploading new wheels to Cloudflare R2..."
 
+          # First check if dist directory exists
+          if [ ! -d "dist" ]; then
+            echo "dist directory not found"
+            exit 1
+          fi
+
           if ! ls dist/*.whl 1> /dev/null 2>&1; then
             echo "No wheel files found to upload"
             exit 1
           fi
 
+          wheel_count=0
           for file in dist/*.whl; do
+            if [ ! -f "$file" ]; then
+              echo "Warning: '$file' is not a regular file, skipping"
+              continue
+            fi
+
+            wheel_count=$((wheel_count + 1))
+            echo "Found wheel: $file"
             echo "sha256:$(sha256sum "$file" | awk '{print $1}')"
 
             echo "Uploading $file..."
@@ -544,7 +559,13 @@ jobs:
               exit 1
             fi
           done
-          echo "All wheels uploaded successfully"
+
+          if [ "$wheel_count" -eq 0 ]; then
+            echo "No wheel files found in dist directory"
+            exit 1
+          fi
+
+          echo "Successfully uploaded $wheel_count wheel files"
 
       - name: Remove old wheels from Cloudflare R2
         run: |
@@ -554,32 +575,54 @@ jobs:
           files=$(aws s3 ls "s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/" --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }} | awk '{print $4}')
           if [ -z "$files" ]; then
               echo "No files found for cleanup"
-          else
-              for file in $files; do
-                  base=$(echo "$file" | sed -E 's/-[0-9]+\.dev[0-9]+.*/-/')
-                  latest=$(echo "$files" | grep "$base" | sort -r | head -n 1)
-                  if [[ "$file" != "$latest" ]]; then
-                      echo "Deleting old wheel: $file"
-                      aws s3 rm "s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/$file" --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }}
-                  fi
-              done
-              echo "Old wheels cleanup completed."
+              exit 0
           fi
+
+          echo "Current wheels:"
+          echo "$files"
+          echo "---"
+
+          # Process each file
+          for file in $files; do
+              # Extract the platform-specific part (everything after the version number)
+              platform=$(echo "$file" | sed -E 's/.*\+[0-9]+-(.+)\.whl/\1/')
+              # Extract the base name and version without build number
+              base=$(echo "$file" | sed -E "s/(.+)-[0-9]+\.[0-9]+\.[0-9]+\.dev[0-9]+\+[0-9]+-${platform}\.whl/\1/")
+
+              # Find latest version for this base+platform combination
+              latest=$(echo "$files" | grep "${base}.*${platform}\.whl$" | sort -r | head -n 1)
+
+              if [[ "$file" != "$latest" ]]; then
+                  echo "Deleting old wheel: $file"
+                  aws s3 rm "s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/$file" --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }}
+              else
+                  echo "Keeping latest wheel: $file"
+              fi
+          done
+          echo "Old wheels cleanup completed"
 
       - name: Generate index.html for Cloudflare R2
         run: |
           set -euo pipefail
-          echo "<!DOCTYPE html>" > index.html
-          echo "<html><head><title>Nautilus Trader Packages</title></head><body>" >> index.html
-          echo "<h1>Package Index</h1>" >> index.html
+          echo "Generating package index..."
+          echo '<!DOCTYPE html>' > index.html
+          echo '<html><head><title>NautilusTrader Packages</title></head>' >> index.html
+          echo '<body><h1>Links for nautilus-trader</h1>' >> index.html
+
           files=$(aws s3 ls "s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/" --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }} | awk '{print $4}')
           for file in $files; do
-            # Use Python to properly escape HTML entities
-            escaped_file=$(python3 -c "import html; print(html.escape('$file'))")
-            echo "<a href=\"$escaped_file\">$escaped_file</a><br>" >> index.html
+            aws s3 cp "s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/$file" \
+              --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }} "$file"
+            hash=$(sha256sum "$file" | awk '{print $1}')
+            escaped_file=$(echo "$file" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g; s/'"'"'/\&#39;/g')
+            echo "<a href=\"$escaped_file#sha256=$hash\">$escaped_file</a><br>" >> index.html
+            rm "$file"
           done
-          echo "</body></html>" >> index.html
-          aws s3 cp index.html "s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/index.html" --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }} \
+
+          echo '</body></html>' >> index.html
+
+          aws s3 cp index.html "s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/index.html" \
+            --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }} \
             --content-type "text/html; charset=utf-8"
 
       - name: Verify uploaded files in Cloudflare R2
