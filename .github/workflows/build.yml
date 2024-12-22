@@ -13,7 +13,8 @@ jobs:
       matrix:
         # os: [ubuntu-22.04, ubuntu-latest]
         os: [ubuntu-22.04]  # TODO!
-        python-version: ["3.11", "3.12"]
+        # python-version: ["3.11", "3.12"]
+        python-version: ["3.12"]  # TODO!
     defaults:
       run:
         shell: bash
@@ -541,8 +542,10 @@ jobs:
             exit 1
           fi
 
+          cd dist
+
           wheel_count=0
-          for file in dist/*.whl; do
+          for file in *.whl; do
             if [ ! -f "$file" ]; then
               echo "Warning: '$file' is not a regular file, skipping"
               continue
