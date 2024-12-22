@@ -207,7 +207,7 @@ jobs:
           echo "ASSET_NAME=$(printf '%s\0' * | awk 'BEGIN{RS="\0"} {print;  exit}')" >> $GITHUB_ENV
 
       - name: Upload wheel artifact
-        if: success() && github.event_name == 'push'
+        if: github.event_name == 'push'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ASSET_NAME }}
@@ -367,7 +367,7 @@ jobs:
   #         echo "ASSET_NAME=$(printf '%s\0' * | awk 'BEGIN{RS="\0"} {print;  exit}')" >> $GITHUB_ENV
   #
   #     - name: Upload wheel artifact
-  #       if: success() && github.event_name == 'push'
+  #       if: github.event_name == 'push'
   #       uses: actions/upload-artifact@v4
   #       with:
   #         name: ${{ env.ASSET_NAME }}
@@ -508,10 +508,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: dist/
+          pattern: '*.whl'
 
       - name: Configure AWS CLI for Cloudflare R2
         run: |
+          set -euo pipefail
           echo "Configuring AWS CLI for Cloudflare R2..."
+
           mkdir -p ~/.aws
           echo "[default]" > ~/.aws/credentials
           echo "aws_access_key_id=${{ env.AWS_ACCESS_KEY_ID }}" >> ~/.aws/credentials
@@ -519,11 +522,13 @@ jobs:
           echo "[default]" > ~/.aws/config
           echo "region=${{ env.CLOUDFLARE_R2_REGION }}" >> ~/.aws/config
           echo "output=json" >> ~/.aws/config
-          echo "AWS CLI configuration completed."
+          echo "AWS CLI configuration completed"
 
       - name: Upload new wheels to Cloudflare R2
         run: |
+          set -euo pipefail
           echo "Uploading new wheels to Cloudflare R2..."
+
           if ! ls dist/*.whl 1> /dev/null 2>&1; then
             echo "No wheel files found to upload"
             exit 1
@@ -533,53 +538,62 @@ jobs:
             echo "sha256:$(sha256sum "$file" | awk '{print $1}')"
 
             echo "Uploading $file..."
-            if ! aws s3 cp "$file" s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/ \
+            if ! aws s3 cp "$file" "s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/" \
               --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }}; then
               echo "Failed to upload $file"
               exit 1
             fi
           done
-          echo "All wheels uploaded successfully."
+          echo "All wheels uploaded successfully"
 
       - name: Remove old wheels from Cloudflare R2
         run: |
+          set -euo pipefail
           echo "Cleaning up old wheels in Cloudflare R2..."
-          files=$(aws s3 ls "${{ env.CLOUDFLARE_R2_URL }}/simple/nautilus-trader/" | awk '{print $4}')
-          for file in $files; do
-            base=$(echo "$file" | sed -E 's/-[0-9]+\.dev[0-9]+.*/-/')
-            latest=$(echo "$files" | grep "$base" | sort -r | head -n 1)
-            if [[ "$file" != "$latest" ]]; then
-              echo "Deleting old wheel: $file"
-              aws s3 rm "${{ env.CLOUDFLARE_R2_URL }}/simple/nautilus-trader/$file"
-            fi
-          done
-          echo "Old wheels cleanup completed."
+
+          files=$(aws s3 ls "s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/" --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }} | awk '{print $4}')
+          if [ -z "$files" ]; then
+              echo "No files found for cleanup"
+          else
+              for file in $files; do
+                  base=$(echo "$file" | sed -E 's/-[0-9]+\.dev[0-9]+.*/-/')
+                  latest=$(echo "$files" | grep "$base" | sort -r | head -n 1)
+                  if [[ "$file" != "$latest" ]]; then
+                      echo "Deleting old wheel: $file"
+                      aws s3 rm "s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/$file" --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }}
+                  fi
+              done
+              echo "Old wheels cleanup completed."
+          fi
 
       - name: Generate index.html for Cloudflare R2
         run: |
+          set -euo pipefail
           echo "<!DOCTYPE html>" > index.html
           echo "<html><head><title>Nautilus Trader Packages</title></head><body>" >> index.html
           echo "<h1>Package Index</h1>" >> index.html
-          files=$(aws s3 ls "${{ env.CLOUDFLARE_R2_URL }}/simple/nautilus-trader/" | awk '{print $4}')
+          files=$(aws s3 ls "s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/" --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }} | awk '{print $4}')
           for file in $files; do
             # Use Python to properly escape HTML entities
             escaped_file=$(python3 -c "import html; print(html.escape('$file'))")
             echo "<a href=\"$escaped_file\">$escaped_file</a><br>" >> index.html
           done
           echo "</body></html>" >> index.html
-          aws s3 cp index.html "${{ env.CLOUDFLARE_R2_URL }}/simple/nautilus-trader/index.html" \
+          aws s3 cp index.html "s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/index.html" --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }} \
             --content-type "text/html; charset=utf-8"
 
       - name: Verify uploaded files in Cloudflare R2
         run: |
+          set -euo pipefail
           echo "Verifying uploaded files in Cloudflare R2..."
-          if ! aws s3 ls "${{ env.CLOUDFLARE_R2_URL }}/simple/nautilus-trader/"; then
+
+          if ! aws s3 ls "s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/" --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }}; then
             echo "Failed to list files in R2 bucket"
             exit 1
           fi
 
           # Verify index.html exists
-          if ! aws s3 ls "${{ env.CLOUDFLARE_R2_URL }}/simple/nautilus-trader/index.html"; then
+          if ! aws s3 ls "s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/index.html" --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }}; then
             echo "index.html not found in R2 bucket"
             exit 1
           fi
@@ -587,29 +601,31 @@ jobs:
 
       - name: Clean up local artifacts
         run: |
-          if [ -d "dist" ]; then
-            rm -rf dist/*
-            echo "Local artifacts removed successfully."
-          else
-            echo "No local artifacts to clean."
-          fi
+          set -euo pipefail
+          ls -lh dist/ || echo "No dist directory found"
+          rm -rf dist/* 2>/dev/null || true
+          echo "Cleanup completed"
 
       - name: Get artifact IDs for current run
         id: list-artifacts
         run: |
+          set -euo pipefail
           echo "Fetching artifact IDs for the current run..."
+
           response=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
           -H "Accept: application/vnd.github+json" \
           https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts)
           echo "$response" > artifacts.json
           ids=$(jq -r '.artifacts[].id' artifacts.json)
           echo "ARTIFACT_IDS=$ids" >> $GITHUB_ENV
-          echo "Artifact IDs fetched successfully."
+          echo "Artifact IDs fetched successfully"
 
       - name: Delete artifacts for current run
         if: success()
         run: |
+          set -euo pipefail
           echo "Deleting artifacts for the current run..."
+
           for id in ${{ env.ARTIFACT_IDS }}; do
             echo "Deleting artifact ID: $id"
             curl -X DELETE -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
@@ -617,4 +633,4 @@ jobs:
             https://api.github.com/repos/${{ github.repository }}/actions/artifacts/$id
             echo "Deleted artifact $id"
           done
-          echo "Artifacts deleted successfully."
+          echo "Artifacts deleted successfully"
