@@ -438,13 +438,6 @@ jobs:
   #     - name: Install build dependencies
   #       run: python -m pip install --upgrade pip setuptools wheel pre-commit
   #
-  #     - name: Cached pre-commit
-  #       id: cached-pre-commit
-  #       uses: actions/cache@v4
-  #       with:
-  #         path: ~/.cache/pre-commit
-  #         key: ${{ runner.os }}-${{ env.PYTHON_VERSION }}-pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
-  #
   #     - name: Cached cargo
   #       id: cached-cargo
   #       uses: actions/cache@v4
@@ -475,11 +468,6 @@ jobs:
   #         path: tests/test_data/large
   #         key: ${{ runner.os }}-large-files-${{ hashFiles('tests/test_data/large/checksums.json') }}
   #         restore-keys: ${{ runner.os }}-large-files-
-  #
-  #     - name: Run pre-commit
-  #       run: |
-  #         # pre-commit run --hook-stage manual gitlint-ci
-  #         pre-commit run --all-files
   #
   #     # Run tests without parallel build (avoids linker errors)
   #     - name: Run tests
