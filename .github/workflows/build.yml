@@ -726,30 +726,40 @@ jobs:
           index_file="index.html"
 
           # Download existing index.html if it exists
-          if aws s3 ls "${bucket_path}${index_file}" --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }} >/dev/null 2>&1; then
+          if aws s3 ls "${bucket_path}${index_file}" --endpoint-url="${{ secrets.CLOUDFLARE_R2_URL }}" >/dev/null 2>&1; then
             echo "Existing index.html found, downloading..."
-            aws s3 cp "${bucket_path}${index_file}" . --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }}
+            aws s3 cp "${bucket_path}${index_file}" . --endpoint-url="${{ secrets.CLOUDFLARE_R2_URL }}"
           else
             echo "No existing index.html found, creating a new one..."
-            echo '<!DOCTYPE html><html><head><title>NautilusTrader Packages</title></head><body><h1>Links for nautilus-trader</h1></body></html>' > "${index_file}"
+            cat <<'EOF' >"${index_file}"
+            <!DOCTYPE html>
+            <html>
+            <head><title>NautilusTrader Packages</title></head>
+            <body><h1>Links for nautilus-trader</h1></body>
+            </html>
+            EOF
           fi
 
           # Extract existing hashes from index.html
           declare -A existing_hashes=()
+
           if [[ -f "$index_file" ]]; then
             echo "Extracting existing hashes from index.html..."
-            grep -oP '<a href="[^"]+">[^<]+</a>' "$index_file" | while read -r line; do
+            # Use process substitution so we remain in the same shell
+            while IFS= read -r line; do
               file=$(echo "$line" | sed -nE 's/.*href="([^#]+)#sha256=.*"/\1/p')
               hash=$(echo "$line" | sed -nE 's/.*sha256=([a-f0-9]{64}).*/\1/p')
               if [[ -n "$file" && -n "$hash" ]]; then
                 existing_hashes["$file"]="$hash"
               fi
-            done
+            done < <(grep -oP '<a href="[^"]+">[^<]+</a>' "$index_file")
           fi
 
           # Fetch existing wheels from the bucket
           echo "Fetching existing wheels from the bucket..."
-          existing_files=$(aws s3 ls "${bucket_path}" --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }} | grep '\.whl$' | awk '{print $4}')
+          existing_files=$(aws s3 ls "${bucket_path}" \
+            --endpoint-url="${{ secrets.CLOUDFLARE_R2_URL }}" \
+            | grep '\.whl$' | awk '{print $4}')
 
           # Find local wheel files
           mkdir -p dist/all
@@ -760,36 +770,52 @@ jobs:
 
           # Prepare a new HTML file (temp file for atomic update)
           temp_html=$(mktemp)
-          echo '<!DOCTYPE html><html><head><title>NautilusTrader Packages</title></head><body><h1>Links for nautilus-trader</h1>' > "${temp_html}"
+          cat <<'EOF' >"$temp_html"
+          <!DOCTYPE html>
+          <html>
+          <head><title>NautilusTrader Packages</title></head>
+          <body><h1>Links for nautilus-trader</h1>
+          EOF
 
           # Add files to the index
           for file in $all_files; do
-            # Check if we already have a hash for this file
-            if [[ -n "${existing_hashes[$file]}" ]]; then
-              hash="${existing_hashes[$file]}"
+            hash="${existing_hashes["$file"]:-}"
+
+            if [[ -n "$hash" ]]; then
               echo "Using existing hash for $file: $hash"
             elif [[ -f "dist/all/$file" ]]; then
-              # Calculate hash for local files
+              # Calculate hash for local file
               hash=$(sha256sum "dist/all/$file" | awk '{print $1}')
-              echo "Calculated hash for $file: $hash"
+              echo "Calculated hash for local file $file: $hash"
             else
-              echo "Warning: Could not find hash for $file"
-              hash=""
+              # File isn't local and has no known hash -> download, compute
+              echo "Downloading missing wheel to compute hash for $file..."
+              tmpfile=$(mktemp)
+              if aws s3 cp "${bucket_path}${file}" "$tmpfile" \
+                --endpoint-url="${{ secrets.CLOUDFLARE_R2_URL }}"; then
+                hash=$(sha256sum "$tmpfile" | awk '{print $1}')
+                echo "Calculated hash after download for $file: $hash"
+              else
+                echo "Warning: Could not download $file for hashing."
+                hash=""
+              fi
+              rm -f "$tmpfile"
             fi
 
-            # Add file with hash (or without hash if unavailable) to the index
+            # Escape special HTML characters in the filename
             escaped_file=$(echo "$file" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g; s/'"'"'/\&#39;/g')
+
             if [[ -n "$hash" ]]; then
-              echo "<a href=\"$escaped_file#sha256=$hash\">$escaped_file</a><br>" >> "${temp_html}"
+              echo "<a href=\"$escaped_file#sha256=$hash\">$escaped_file</a><br>" >> "$temp_html"
             else
-              echo "<a href=\"$escaped_file\">$escaped_file</a><br>" >> "${temp_html}"
+              echo "<a href=\"$escaped_file\">$escaped_file</a><br>" >> "$temp_html"
             fi
           done
 
-          echo '</body></html>' >> "${temp_html}"
+          echo '</body></html>' >> "$temp_html"
 
           # Replace the old index.html atomically
-          mv "${temp_html}" "${index_file}"
+          mv "$temp_html" "$index_file"
           echo "Index generation complete"
 
       - name: Upload index.html to Cloudflare R2
