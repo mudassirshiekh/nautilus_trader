@@ -2,7 +2,7 @@ name: build
 
 on:
   push:
-    branches: [master, develop, build]  # TODO: remove build
+    branches: [master, nightly, develop, build]  # TODO: remove build
   pull_request:
     branches: [develop]
 
@@ -202,15 +202,25 @@ jobs:
       - name: Update version in pyproject.toml
         run: |
           current_version=$(grep '^version = ' pyproject.toml | cut -d '"' -f2)
-          date_suffix=".dev$(date +%Y%m%d)"
-          build_number=${{ github.run_number }}
-          new_version="${current_version}${date_suffix}+${build_number}"
-          if [[ $current_version != *"$date_suffix" ]] || [[ $current_version != *"+${build_number}" ]]; then
-            sed -i.bak "s/^version = \".*\"/version = \"${new_version}\"/" pyproject.toml
-            rm -f pyproject.toml.bak  # Clean up backup file
-            echo "Updated version to ${new_version}"
+          branch_name="${GITHUB_REF_NAME}"  # Get the branch name
+
+          if [[ "$branch_name" == "nightly" ]]; then
+            # Nightly branch: use alpha versioning
+            suffix=".a$(date +%Y%m%d)"
+            new_version="${current_version%-*}${suffix}"
           else
-            echo "Version already updated to ${new_version}"
+            # Develop branch: use dev versioning with build number
+            suffix=".dev$(date +%Y%m%d)+${{ github.run_number }}"
+            new_version="${current_version%-*}${suffix}"
+          fi
+
+          if [[ "$current_version" != *"$suffix"* ]]; then
+            if sed -i.bak "s/^version = \".*\"/version = \"${new_version}\"/" pyproject.toml; then
+              echo "Version updated to ${new_version}"
+            else
+              echo "Error: Failed to update version in pyproject.toml" >&2
+              exit 1
+            fi
           fi
 
       - name: Generate updated lock file
@@ -362,15 +372,25 @@ jobs:
       - name: Update version in pyproject.toml
         run: |
           current_version=$(grep '^version = ' pyproject.toml | cut -d '"' -f2)
-          date_suffix=".dev$(date +%Y%m%d)"
-          build_number=${{ github.run_number }}
-          new_version="${current_version}${date_suffix}+${build_number}"
-          if [[ $current_version != *"$date_suffix" ]] || [[ $current_version != *"+${build_number}" ]]; then
-            sed -i.bak "s/^version = \".*\"/version = \"${new_version}\"/" pyproject.toml
-            rm -f pyproject.toml.bak  # Clean up backup file
-            echo "Updated version to ${new_version}"
+          branch_name="${GITHUB_REF_NAME}"  # Get the branch name
+
+          if [[ "$branch_name" == "nightly" ]]; then
+            # Nightly branch: use alpha versioning
+            suffix=".a$(date +%Y%m%d)"
+            new_version="${current_version%-*}${suffix}"
           else
-            echo "Version already updated to ${new_version}"
+            # Develop branch: use dev versioning with build number
+            suffix=".dev$(date +%Y%m%d)+${{ github.run_number }}"
+            new_version="${current_version%-*}${suffix}"
+          fi
+
+          if [[ "$current_version" != *"$suffix"* ]]; then
+            if sed -i.bak "s/^version = \".*\"/version = \"${new_version}\"/" pyproject.toml; then
+              echo "Version updated to ${new_version}"
+            else
+              echo "Error: Failed to update version in pyproject.toml" >&2
+              exit 1
+            fi
           fi
 
       - name: Generate updated lock file
@@ -513,7 +533,7 @@ jobs:
     name: publish-packages
     runs-on: ubuntu-latest
     needs: [build-linux, build-macos]
-    if: success() && github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/build')  # TODO: remove build
+    if: success() && github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/nightly' || github.ref == 'refs/heads/build')  # TODO: remove build
     env:
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -612,8 +632,9 @@ jobs:
       - name: Remove old wheels from Cloudflare R2
         run: |
           set -euo pipefail
-          echo "Cleaning up old dev wheels in Cloudflare R2..."
+          echo "Cleaning up old wheels in Cloudflare R2..."
 
+          branch_name="${GITHUB_REF_NAME}"  # Get the current branch
           files=$(aws s3 ls "s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/" --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }} | awk '{print $4}')
           if [ -z "$files" ]; then
               echo "No files found for cleanup"
@@ -624,42 +645,77 @@ jobs:
           echo "$files"
           echo "---"
 
-          # Process each file
-          for file in $files; do
-              if [[ "$file" == "index.html" ]]; then
-                  echo "Skipping index.html"
-                  continue
-              fi
+          # Skip index.html
+          files=$(echo "$files" | grep -v "^index\.html$")
 
-              echo "Processing: $file"
+          # Clean up dev wheels on the develop branch
+          if [[ "$branch_name" == "develop" ]]; then
+              echo "Cleaning up .dev wheels for the develop branch..."
 
-              # Check if the file is a .dev wheel
-              if [[ "$file" != *".dev"* ]]; then
-                  echo "Skipping non-.dev wheel: $file"
-                  continue
-              fi
+              for base_platform in $(echo "$files" | sed -E "s/^(.+)-[0-9]+\.[0-9]+\.[0-9]+\.dev[0-9]+-(.+)\.whl$/\1-\2/" | sort | uniq); do
+                  echo "Processing base-platform combination: $base_platform"
 
-              # Extract the base name, platform, and version suffix
-              base=$(echo "$file" | sed -E "s/^(.+)-[0-9]+\.[0-9]+\.[0-9]+\.dev[0-9]+\+[0-9]+-(.+)\.whl/\1/")
-              platform=$(echo "$file" | sed -E "s/^.+-([0-9]+\.[0-9]+\.[0-9]+\.dev[0-9]+\+[0-9]+)-(.+)\.whl/\2/")
+                  # Get all .dev wheels for this base-platform combination
+                  matching_files=$(echo "$files" | grep "^${base_platform%-*}-" | grep ".dev" | sort -V)
 
-              echo "Base: $base, Platform: $platform"
+                  echo "Matching files for $base_platform:"
+                  echo "$matching_files"
 
-              # Find the latest .dev wheel for this base and platform
-              latest=$(echo "$files" | grep "^${base}-" | grep ".dev" | grep "${platform}\.whl$" | sort -V | tail -n 1)
+                  # Keep only the latest version for each platform
+                  latest=$(echo "$matching_files" | tail -n 1)
+                  echo "Latest version to keep: $latest"
 
-              echo "Latest .dev wheel for $base-$platform: $latest"
+                  # Delete all but the latest
+                  for file in $matching_files; do
+                      if [[ "$file" != "$latest" ]]; then
+                          echo "Deleting old .dev wheel: $file"
+                          if ! aws s3 rm "s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/$file" --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }}; then
+                              echo "Warning: Failed to delete $file, skipping..."
+                          fi
+                      else
+                          echo "Keeping wheel: $file"
+                      fi
+                  done
+              done
+              echo "Finished cleaning up .dev wheels"
+          fi
 
-              if [[ "$file" != "$latest" ]]; then
-                  echo "Deleting old .dev wheel: $file"
-                  if ! aws s3 rm "s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/$file" --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }}; then
-                      echo "Warning: Failed to delete $file, skipping..."
-                  fi
-              else
-                  echo "Keeping latest .dev wheel: $file"
-              fi
-          done
-          echo "Dev wheels cleanup completed"
+          # Clean up alpha (.a) wheels on the nightly branch
+          if [[ "$branch_name" == "nightly" ]]; then
+              echo "Cleaning up .a wheels for the nightly branch..."
+
+              for base_platform in $(echo "$files" | sed -E "s/^(.+)-[0-9]+\.[0-9]+\.[0-9]+\.a[0-9]+-(.+)\.whl$/\1-\2/" | sort | uniq); do
+                  echo "Processing base-platform combination: $base_platform"
+
+                  # Get all .a wheels for this base-platform combination
+                  matching_files=$(echo "$files" | grep "^${base_platform%-*}-" | grep ".a" | sort -V)
+
+                  echo "Matching files for $base_platform:"
+                  echo "$matching_files"
+
+                  # Extract unique versions (dates) from matching files
+                  versions=$(echo "$matching_files" | sed -E "s/^.+-[0-9]+\.[0-9]+\.[0-9]+\.a([0-9]+)-.+\.whl$/\1/" | sort -u)
+                  echo "Unique versions (dates) for $base_platform: $versions"
+
+                  # Retain only the last 3 versions
+                  versions_to_keep=$(echo "$versions" | tail -n 3)
+                  echo "Versions to keep for $base_platform: $versions_to_keep"
+
+                  # Delete files not in the last 3 versions
+                  for file in $matching_files; do
+                      file_version=$(echo "$file" | sed -E "s/^.+-[0-9]+\.[0-9]+\.[0-9]+\.a([0-9]+)-.+\.whl$/\1/")
+                      if echo "$versions_to_keep" | grep -qx "$file_version"; then
+                          echo "Keeping wheel: $file"
+                      else
+                          echo "Deleting old .a wheel: $file"
+                          if ! aws s3 rm "s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/$file" --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }}; then
+                              echo "Warning: Failed to delete $file, skipping..."
+                          fi
+                      fi
+                  done
+              done
+              echo "Finished cleaning up .a wheels"
+          fi
 
       - name: Generate index.html
         run: |
