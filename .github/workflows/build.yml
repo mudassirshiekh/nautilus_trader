@@ -655,18 +655,21 @@ jobs:
             echo "All files before filtering:"
             echo "$files"
 
-            for base_platform in $(echo "$files" | sed -E "s/^(.+)-[0-9]+\.[0-9]+\.[0-9]+\.dev[0-9]+\+[0-9]+-(.+)\.whl$/\1-\2/" | sort | uniq); do
-              echo "Processing base-platform combination: $base_platform"
-              platform_suffix="${base_platform##*-}"
-              echo "Platform suffix: $platform_suffix"
+            # First find unique platform suffixes
+            platform_tags=$(echo "$files" | grep "\.dev" | sed -E 's/.*-(cp[^.]+).whl$/\1/' | sort -u)
+            echo "Found platform tags:"
+            echo "$platform_tags"
 
-              # Get all .dev wheels for this platform combination
-              matching_files=$(echo "$files" | grep "^nautilus_trader-.*\.dev.*-${base_platform##*-}" | sort -t'+' -k2 -V)
+            for platform_tag in $platform_tags; do
+              echo "Processing platform: $platform_tag"
 
-              echo "Matching files for $platform_suffix:"
+              # Get all dev wheels for this platform
+              matching_files=$(echo "$files" | grep "\.dev.*-${platform_tag}\.whl$" | sort -t'+' -k2 -V)
+
+              echo "Matching files:"
               echo "$matching_files"
 
-              # Keep only the latest version for each platform
+              # Keep only the latest version
               latest=$(echo "$matching_files" | tail -n 1)
               echo "Latest version to keep: $latest"
 
@@ -691,22 +694,27 @@ jobs:
             echo "All files before filtering:"
             echo "$files"
 
-            for base_platform in $(echo "$files" | sed -E "s/^(.+)-[0-9]+\.[0-9]+\.[0-9]+\.a[0-9]{8}-(.+)\.whl$/\1-\2/" | sort | uniq); do
-              echo "Processing base-platform combination: $base_platform"
+            # First find unique platform suffixes
+            platform_tags=$(echo "$files" | grep "\.a" | sed -E 's/.*-(cp[^.]+).whl$/\1/' | sort -u)
+            echo "Found platform tags:"
+            echo "$platform_tags"
 
-              # Get all .a wheels for this platform combination - use full platform string
-              matching_files=$(echo "$files" | grep "^nautilus_trader-.*\.a.*-${base_platform##*-}" | sort -t'a' -k2 -V)
+            for platform_tag in $platform_tags; do
+              echo "Processing platform: $platform_tag"
 
-              echo "Matching files for $base_platform:"
+              # Get all alpha wheels for this platform
+              matching_files=$(echo "$files" | grep "\.a.*-${platform_tag}\.whl$" | sort -t'a' -k2 -V)
+
+              echo "Matching files:"
               echo "$matching_files"
 
               # Extract unique versions (dates) from matching files
               versions=$(echo "$matching_files" | sed -E "s/^.+-[0-9]+\.[0-9]+\.[0-9]+\.a([0-9]{8})-.+\.whl$/\1/" | sort -n)
-              echo "Unique versions (dates) for $base_platform: $versions"
+              echo "Unique versions (dates) for platform: $versions"
 
               # Retain only the last 3 versions
               versions_to_keep=$(echo "$versions" | tail -n 3)
-              echo "Versions to keep for $base_platform: $versions_to_keep"
+              echo "Versions to keep: $versions_to_keep"
 
               # Delete files not in the last 3 versions
               for file in $matching_files; do
