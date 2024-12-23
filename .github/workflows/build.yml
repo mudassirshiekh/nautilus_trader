@@ -653,8 +653,11 @@ jobs:
           if [[ "$branch_name" == "develop" ]]; then
             echo "Cleaning up .dev wheels for the develop branch..."
 
-              for base_platform in $(echo "$files" | sed -E "s/^(.+)-[0-9]+\.[0-9]+\.[0-9]+\.dev[0-9]+\+[0-9]+-(.+)\.whl$/\1-\2/" | sort | uniq); do
-                echo "Processing base-platform combination: $base_platform"
+            echo "All files before filtering:"
+            echo "$files"
+
+            for base_platform in $(echo "$files" | sed -E "s/^(.+)-[0-9]+\.[0-9]+\.[0-9]+\.dev[0-9]+\+[0-9]+-(.+)\.whl$/\1-\2/" | sort | uniq); do
+              echo "Processing base-platform combination: $base_platform"
 
               # Get all .dev wheels for this base-platform combination
               matching_files=$(echo "$files" | grep "^${base_platform%%-*}" | grep ".dev" | sort -t'+' -k2 -V)
@@ -668,14 +671,14 @@ jobs:
 
               # Delete all but the latest
               for file in $matching_files; do
-                  if [[ "$file" != "$latest" ]]; then
-                      echo "Deleting old .dev wheel: $file"
-                      if ! aws s3 rm "s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/$file" --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }}; then
-                          echo "Warning: Failed to delete $file, skipping..."
-                      fi
-                  else
-                      echo "Keeping wheel: $file"
+                if [[ "$file" != "$latest" ]]; then
+                  echo "Deleting old .dev wheel: $file"
+                  if ! aws s3 rm "s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/$file" --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }}; then
+                    echo "Warning: Failed to delete $file, skipping..."
                   fi
+                else
+                  echo "Keeping wheel: $file"
+                fi
               done
             done
             echo "Finished cleaning up .dev wheels"
@@ -684,6 +687,9 @@ jobs:
           # Clean up alpha (.a) wheels on the nightly branch
           if [[ "$branch_name" == "nightly" ]]; then
             echo "Cleaning up .a wheels for the nightly branch..."
+
+            echo "All files before filtering:"
+            echo "$files"
 
             for base_platform in $(echo "$files" | sed -E "s/^(.+)-[0-9]+\.[0-9]+\.[0-9]+\.a[0-9]{8}-(.+)\.whl$/\1-\2/" | sort | uniq); do
               echo "Processing base-platform combination: $base_platform"
@@ -743,19 +749,14 @@ jobs:
           if [[ -f "$index_file" ]]; then
             echo "Extracting existing hashes from index.html..."
             while IFS= read -r line; do
-              file=$(echo "$line" | sed -nE 's/.*href="([^#]+)#sha256=.*"/\1/p')
-              hash=$(echo "$line" | sed -nE 's/.*sha256=([a-f0-9]{64}).*/\1/p')
-
-              echo "DEBUG: Processing line: $line"
-              echo "DEBUG: Extracted file: $file"
-              echo "DEBUG: Extracted hash: $hash"
-
-              if [[ -n "$file" && -n "$hash" ]]; then
+              if [[ $line =~ href=\"([^\"#]+)#sha256=([a-f0-9]{64}) ]]; then
+                file="${BASH_REMATCH[1]}"
+                hash="${BASH_REMATCH[2]}"
                 existing_hashes["$file"]="$hash"
-                echo "DEBUG: Added hash for $file"
+                echo "Found hash for $file"
               fi
-            done < <(grep -oP '<a href="[^"]+">[^<]+</a>' "$index_file")
-            echo "DEBUG: Total hashes found: ${#existing_hashes[@]}"
+            done < "$index_file"
+            echo "Total hashes found: ${#existing_hashes[@]}"
           fi
 
           # Fetch existing wheels from the bucket
