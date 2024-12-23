@@ -731,21 +731,16 @@ jobs:
             aws s3 cp "${bucket_path}${index_file}" . --endpoint-url="${{ secrets.CLOUDFLARE_R2_URL }}"
           else
             echo "No existing index.html found, creating a new one..."
-            cat <<'EOF' >"${index_file}"
-            <!DOCTYPE html>
-            <html>
-            <head><title>NautilusTrader Packages</title></head>
-            <body><h1>Links for nautilus-trader</h1></body>
-            </html>
-            EOF
+            echo '<!DOCTYPE html>' > "${index_file}"
+            echo '<html><head><title>NautilusTrader Packages</title></head>' >> "${index_file}"
+            echo '<body><h1>Links for nautilus-trader</h1></body></html>' >> "${index_file}"
+            echo "No existing index.html found, creating a new one..."
           fi
 
           # Extract existing hashes from index.html
           declare -A existing_hashes=()
-
           if [[ -f "$index_file" ]]; then
             echo "Extracting existing hashes from index.html..."
-            # Use process substitution so we remain in the same shell
             while IFS= read -r line; do
               file=$(echo "$line" | sed -nE 's/.*href="([^#]+)#sha256=.*"/\1/p')
               hash=$(echo "$line" | sed -nE 's/.*sha256=([a-f0-9]{64}).*/\1/p')
@@ -757,9 +752,7 @@ jobs:
 
           # Fetch existing wheels from the bucket
           echo "Fetching existing wheels from the bucket..."
-          existing_files=$(aws s3 ls "${bucket_path}" \
-            --endpoint-url="${{ secrets.CLOUDFLARE_R2_URL }}" \
-            | grep '\.whl$' | awk '{print $4}')
+          existing_files=$(aws s3 ls "${bucket_path}" --endpoint-url="${{ secrets.CLOUDFLARE_R2_URL }}" | grep '\.whl$' | awk '{print $4}')
 
           # Find local wheel files
           mkdir -p dist/all
@@ -770,12 +763,9 @@ jobs:
 
           # Prepare a new HTML file (temp file for atomic update)
           temp_html=$(mktemp)
-          cat <<'EOF' >"$temp_html"
-          <!DOCTYPE html>
-          <html>
-          <head><title>NautilusTrader Packages</title></head>
-          <body><h1>Links for nautilus-trader</h1>
-          EOF
+          echo '<!DOCTYPE html>' > "$temp_html"
+          echo '<html><head><title>NautilusTrader Packages</title></head>' >> "$temp_html"
+          echo '<body><h1>Links for nautilus-trader</h1>' >> "$temp_html"
 
           # Add files to the index
           for file in $all_files; do
