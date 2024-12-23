@@ -735,7 +735,7 @@ jobs:
           fi
 
           # Extract existing hashes from index.html
-          declare -A existing_hashes
+          declare -A existing_hashes=()
           if [[ -f "$index_file" ]]; then
             echo "Extracting existing hashes from index.html..."
             grep -oP '<a href="[^"]+">[^<]+</a>' "$index_file" | while read -r line; do
