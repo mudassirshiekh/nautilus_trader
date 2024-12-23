@@ -650,7 +650,7 @@ jobs:
           files=$(echo "$files" | grep -v "^index\.html$")
 
           # Clean up dev wheels on the develop branch
-          if [[ "$branch_name" == "develop" ]]; then
+          if [[ "$branch_name" == "develop" || "$branch_name" == "build" ]]; then
             echo "Cleaning up .dev wheels for the develop branch..."
             echo "All files before filtering:"
             echo "$files"
