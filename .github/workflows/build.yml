@@ -652,17 +652,18 @@ jobs:
           # Clean up dev wheels on the develop branch
           if [[ "$branch_name" == "develop" ]]; then
             echo "Cleaning up .dev wheels for the develop branch..."
-
             echo "All files before filtering:"
             echo "$files"
 
             for base_platform in $(echo "$files" | sed -E "s/^(.+)-[0-9]+\.[0-9]+\.[0-9]+\.dev[0-9]+\+[0-9]+-(.+)\.whl$/\1-\2/" | sort | uniq); do
               echo "Processing base-platform combination: $base_platform"
+              platform_suffix="${base_platform##*-}"
+              echo "Platform suffix: $platform_suffix"
 
-              # Get all .dev wheels for this base-platform combination
-              matching_files=$(echo "$files" | grep "^${base_platform%%-*}" | grep ".dev" | sort -t'+' -k2 -V)
+              # Get all .dev wheels for this platform combination
+              matching_files=$(echo "$files" | grep "^nautilus_trader-.*\.dev.*-${base_platform##*-}" | sort -t'+' -k2 -V)
 
-              echo "Matching files for $base_platform:"
+              echo "Matching files for $platform_suffix:"
               echo "$matching_files"
 
               # Keep only the latest version for each platform
@@ -687,15 +688,14 @@ jobs:
           # Clean up alpha (.a) wheels on the nightly branch
           if [[ "$branch_name" == "nightly" ]]; then
             echo "Cleaning up .a wheels for the nightly branch..."
-
             echo "All files before filtering:"
             echo "$files"
 
             for base_platform in $(echo "$files" | sed -E "s/^(.+)-[0-9]+\.[0-9]+\.[0-9]+\.a[0-9]{8}-(.+)\.whl$/\1-\2/" | sort | uniq); do
               echo "Processing base-platform combination: $base_platform"
 
-              # Get all .a wheels for this base-platform combination
-              matching_files=$(echo "$files" | grep "^${base_platform%%-*}" | grep ".a" | sort -t'a' -k2 -V)
+              # Get all .a wheels for this platform combination - use full platform string
+              matching_files=$(echo "$files" | grep "^nautilus_trader-.*\.a.*-${base_platform##*-}" | sort -t'a' -k2 -V)
 
               echo "Matching files for $base_platform:"
               echo "$matching_files"
