@@ -652,7 +652,7 @@ jobs:
           if [[ "$branch_name" == "develop" ]]; then
             echo "Cleaning up .dev wheels for the develop branch..."
 
-            for base_platform in $(echo "$files" | sed -E "s/^(.+)-[0-9]+\.[0-9]+\.[0-9]+\.dev[0-9]+-(.+)\.whl$/\1-\2/" | sort | uniq); do
+            for base_platform in $(echo "$files" | sed -E "s/^(.+)-[0-9]+\.[0-9]+\.[0-9]+\.dev[0-9]+\+[0-9]+-(.+)\.whl$/\1-\2/" | sort | uniq); do
               echo "Processing base-platform combination: $base_platform"
 
               # Get all .dev wheels for this base-platform combination
@@ -684,7 +684,7 @@ jobs:
           if [[ "$branch_name" == "nightly" ]]; then
             echo "Cleaning up .a wheels for the nightly branch..."
 
-            for base_platform in $(echo "$files" | sed -E "s/^(.+)-[0-9]+\.[0-9]+\.[0-9]+\.a[0-9]+-(.+)\.whl$/\1-\2/" | sort | uniq); do
+            for base_platform in $(echo "$files" | sed -E "s/^(.+)-[0-9]+\.[0-9]+\.[0-9]+\.a[0-9]{8}-(.+)\.whl$/\1-\2/" | sort | uniq); do
               echo "Processing base-platform combination: $base_platform"
 
               # Get all .a wheels for this base-platform combination
@@ -694,7 +694,7 @@ jobs:
               echo "$matching_files"
 
               # Extract unique versions (dates) from matching files
-              versions=$(echo "$matching_files" | sed -E "s/^.+-[0-9]+\.[0-9]+\.[0-9]+\.a([0-9]+)-.+\.whl$/\1/" | sort -u)
+              versions=$(echo "$matching_files" | sed -E "s/^.+-[0-9]+\.[0-9]+\.[0-9]+\.a([0-9]{8})-.+\.whl$/\1/" | sort -u)
               echo "Unique versions (dates) for $base_platform: $versions"
 
               # Retain only the last 3 versions
@@ -703,7 +703,7 @@ jobs:
 
               # Delete files not in the last 3 versions
               for file in $matching_files; do
-                file_version=$(echo "$file" | sed -E "s/^.+-[0-9]+\.[0-9]+\.[0-9]+\.a([0-9]+)-.+\.whl$/\1/")
+                file_version=$(echo "$file" | sed -E "s/^.+-[0-9]+\.[0-9]+\.[0-9]+\.a([0-9]{8})-.+\.whl$/\1/")
                 if echo "$versions_to_keep" | grep -qx "$file_version"; then
                   echo "Keeping wheel: $file"
                 else
