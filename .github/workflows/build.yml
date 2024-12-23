@@ -684,40 +684,35 @@ jobs:
             existing_hashes["$file"]="$hash"
           done
 
-          # Fetch file list from bucket
-          echo "Fetching file list from bucket..."
-          files=$(aws s3 ls "${bucket_path}" --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }} | awk '{print $4}')
-
-          if [[ -z "$files" ]]; then
-            echo "No files found in the bucket. Exiting."
-            exit 1
-          fi
+          # Find all local wheel files
+          echo "Scanning local wheels in dist/all/..."
+          mkdir -p dist/all  # Ensure directory exists
+          local_files=$(find dist/all -type f -name "*.whl")
 
           # Prepare a new HTML file (temp file for atomic update)
           temp_html=$(mktemp)
           echo '<!DOCTYPE html><html><head><title>NautilusTrader Packages</title></head><body><h1>Links for nautilus-trader</h1>' > "${temp_html}"
 
-          # Update the index with new hashes
-          for file in $files; do
-            if [[ "$file" == "index.html" ]]; then
-              echo "Skipping index.html"
-              continue
-            fi
+          # Update the index with local wheels and hashes
+          for file in $local_files; do
+            file_name=$(basename "$file")
 
-            # Use existing hash if available, otherwise calculate it
-            if [[ -n "${existing_hashes["$file"]+x}" ]]; then
-              hash="${existing_hashes["$file"]}"
-              echo "Using existing hash for $file"
-            else
-              echo "Downloading $file to calculate hash..."
-              aws s3 cp "${bucket_path}${file}" . --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }}
+            # Calculate the hash for local files or skip if not possible
+            if [[ -f "$file" ]]; then
               hash=$(sha256sum "$file" | awk '{print $1}')
-              rm "$file"
+              echo "Calculated hash for $file_name: $hash"
+            else
+              echo "Warning: $file_name is missing or inaccessible, skipping hash..."
+              hash=""
             fi
 
             # Add file to index
-            escaped_file=$(echo "$file" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g; s/'"'"'/\&#39;/g')
-            echo "<a href=\"$escaped_file#sha256=$hash\">$escaped_file</a><br>" >> "${temp_html}"
+            escaped_file=$(echo "$file_name" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g; s/'"'"'/\&#39;/g')
+            if [[ -n "$hash" ]]; then
+              echo "<a href=\"$escaped_file#sha256=$hash\">$escaped_file</a><br>" >> "${temp_html}"
+            else
+              echo "<a href=\"$escaped_file\">$escaped_file</a><br>" >> "${temp_html}"
+            fi
           done
 
           echo '</body></html>' >> "${temp_html}"
