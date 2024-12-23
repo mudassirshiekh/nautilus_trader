@@ -606,19 +606,19 @@ jobs:
 
             echo "Uploading $file..."
             for i in {1..3}; do
-                if aws s3 cp "$file" "s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/" \
-                    --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }} \
-                    --content-type "application/zip"; then
-                    echo "Successfully uploaded $file"
-                    break
-                else
-                    echo "Upload failed for $file, retrying ($i/3)..."
-                    sleep 5
-                fi
+              if aws s3 cp "$file" "s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/" \
+                --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }} \
+                --content-type "application/zip"; then
+                echo "Successfully uploaded $file"
+                break
+              else
+                echo "Upload failed for $file, retrying ($i/3)..."
+                sleep 5
+              fi
 
-                if [ $i -eq 3 ]; then
-                    echo "Failed to upload $file after 3 attempts"
-                fi
+              if [ $i -eq 3 ]; then
+                echo "Failed to upload $file after 3 attempts"
+              fi
             done
           done
 
@@ -637,8 +637,8 @@ jobs:
           branch_name="${GITHUB_REF_NAME}"  # Get the current branch
           files=$(aws s3 ls "s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/" --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }} | awk '{print $4}')
           if [ -z "$files" ]; then
-              echo "No files found for cleanup"
-              exit 0
+            echo "No files found for cleanup"
+            exit 0
           fi
 
           echo "Current wheels:"
@@ -650,71 +650,71 @@ jobs:
 
           # Clean up dev wheels on the develop branch
           if [[ "$branch_name" == "develop" ]]; then
-              echo "Cleaning up .dev wheels for the develop branch..."
+            echo "Cleaning up .dev wheels for the develop branch..."
 
-              for base_platform in $(echo "$files" | sed -E "s/^(.+)-[0-9]+\.[0-9]+\.[0-9]+\.dev[0-9]+-(.+)\.whl$/\1-\2/" | sort | uniq); do
-                  echo "Processing base-platform combination: $base_platform"
+            for base_platform in $(echo "$files" | sed -E "s/^(.+)-[0-9]+\.[0-9]+\.[0-9]+\.dev[0-9]+-(.+)\.whl$/\1-\2/" | sort | uniq); do
+              echo "Processing base-platform combination: $base_platform"
 
-                  # Get all .dev wheels for this base-platform combination
-                  matching_files=$(echo "$files" | grep "^${base_platform%-*}-" | grep ".dev" | sort -V)
+              # Get all .dev wheels for this base-platform combination
+              matching_files=$(echo "$files" | grep "^${base_platform%-*}-" | grep ".dev" | sort -V)
 
-                  echo "Matching files for $base_platform:"
-                  echo "$matching_files"
+              echo "Matching files for $base_platform:"
+              echo "$matching_files"
 
-                  # Keep only the latest version for each platform
-                  latest=$(echo "$matching_files" | tail -n 1)
-                  echo "Latest version to keep: $latest"
+              # Keep only the latest version for each platform
+              latest=$(echo "$matching_files" | tail -n 1)
+              echo "Latest version to keep: $latest"
 
-                  # Delete all but the latest
-                  for file in $matching_files; do
-                      if [[ "$file" != "$latest" ]]; then
-                          echo "Deleting old .dev wheel: $file"
-                          if ! aws s3 rm "s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/$file" --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }}; then
-                              echo "Warning: Failed to delete $file, skipping..."
-                          fi
-                      else
-                          echo "Keeping wheel: $file"
+              # Delete all but the latest
+              for file in $matching_files; do
+                  if [[ "$file" != "$latest" ]]; then
+                      echo "Deleting old .dev wheel: $file"
+                      if ! aws s3 rm "s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/$file" --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }}; then
+                          echo "Warning: Failed to delete $file, skipping..."
                       fi
-                  done
+                  else
+                      echo "Keeping wheel: $file"
+                  fi
               done
-              echo "Finished cleaning up .dev wheels"
+            done
+            echo "Finished cleaning up .dev wheels"
           fi
 
           # Clean up alpha (.a) wheels on the nightly branch
           if [[ "$branch_name" == "nightly" ]]; then
-              echo "Cleaning up .a wheels for the nightly branch..."
+            echo "Cleaning up .a wheels for the nightly branch..."
 
-              for base_platform in $(echo "$files" | sed -E "s/^(.+)-[0-9]+\.[0-9]+\.[0-9]+\.a[0-9]+-(.+)\.whl$/\1-\2/" | sort | uniq); do
-                  echo "Processing base-platform combination: $base_platform"
+            for base_platform in $(echo "$files" | sed -E "s/^(.+)-[0-9]+\.[0-9]+\.[0-9]+\.a[0-9]+-(.+)\.whl$/\1-\2/" | sort | uniq); do
+              echo "Processing base-platform combination: $base_platform"
 
-                  # Get all .a wheels for this base-platform combination
-                  matching_files=$(echo "$files" | grep "^${base_platform%-*}-" | grep ".a" | sort -V)
+              # Get all .a wheels for this base-platform combination
+              matching_files=$(echo "$files" | grep "^${base_platform%-*}-" | grep ".a" | sort -V)
 
-                  echo "Matching files for $base_platform:"
-                  echo "$matching_files"
+              echo "Matching files for $base_platform:"
+              echo "$matching_files"
 
-                  # Extract unique versions (dates) from matching files
-                  versions=$(echo "$matching_files" | sed -E "s/^.+-[0-9]+\.[0-9]+\.[0-9]+\.a([0-9]+)-.+\.whl$/\1/" | sort -u)
-                  echo "Unique versions (dates) for $base_platform: $versions"
+              # Extract unique versions (dates) from matching files
+              versions=$(echo "$matching_files" | sed -E "s/^.+-[0-9]+\.[0-9]+\.[0-9]+\.a([0-9]+)-.+\.whl$/\1/" | sort -u)
+              echo "Unique versions (dates) for $base_platform: $versions"
 
-                  # Retain only the last 3 versions
-                  versions_to_keep=$(echo "$versions" | tail -n 3)
-                  echo "Versions to keep for $base_platform: $versions_to_keep"
+              # Retain only the last 3 versions
+              versions_to_keep=$(echo "$versions" | tail -n 3)
+              echo "Versions to keep for $base_platform: $versions_to_keep"
 
-                  # Delete files not in the last 3 versions
-                  for file in $matching_files; do
-                      file_version=$(echo "$file" | sed -E "s/^.+-[0-9]+\.[0-9]+\.[0-9]+\.a([0-9]+)-.+\.whl$/\1/")
-                      if echo "$versions_to_keep" | grep -qx "$file_version"; then
-                          echo "Keeping wheel: $file"
-                      else
-                          echo "Deleting old .a wheel: $file"
-                          if ! aws s3 rm "s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/$file" --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }}; then
-                              echo "Warning: Failed to delete $file, skipping..."
-                          fi
-                      fi
-                  done
+              # Delete files not in the last 3 versions
+              for file in $matching_files; do
+                file_version=$(echo "$file" | sed -E "s/^.+-[0-9]+\.[0-9]+\.[0-9]+\.a([0-9]+)-.+\.whl$/\1/")
+                if echo "$versions_to_keep" | grep -qx "$file_version"; then
+                  echo "Keeping wheel: $file"
+                else
+                  echo "Deleting old .a wheel: $file"
+                  if ! aws s3 rm "s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/$file" --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }}; then
+                    echo "Warning: Failed to delete $file, skipping..."
+                  fi
+                fi
               done
-              echo "Finished cleaning up .a wheels"
+            done
+            echo "Finished cleaning up .a wheels"
           fi
 
       - name: Generate index.html
@@ -734,36 +734,51 @@ jobs:
             echo '<!DOCTYPE html><html><head><title>NautilusTrader Packages</title></head><body><h1>Links for nautilus-trader</h1></body></html>' > "${index_file}"
           fi
 
-          # Extract existing hashes
+          # Extract existing hashes from index.html
           declare -A existing_hashes
-          grep -oP 'href="\K[^#]+#sha256=\K[^"]+' "${index_file}" | while read -r file hash; do
-            existing_hashes["$file"]="$hash"
-          done
+          if [[ -f "$index_file" ]]; then
+            echo "Extracting existing hashes from index.html..."
+            grep -oP '<a href="[^"]+">[^<]+</a>' "$index_file" | while read -r line; do
+              file=$(echo "$line" | sed -nE 's/.*href="([^#]+)#sha256=.*"/\1/p')
+              hash=$(echo "$line" | sed -nE 's/.*sha256=([a-f0-9]{64}).*/\1/p')
+              if [[ -n "$file" && -n "$hash" ]]; then
+                existing_hashes["$file"]="$hash"
+              fi
+            done
+          fi
 
-          # Find all local wheel files
-          echo "Scanning local wheels in dist/all/..."
-          mkdir -p dist/all  # Ensure directory exists
-          local_files=$(find dist/all -type f -name "*.whl")
+          # Fetch existing wheels from the bucket
+          echo "Fetching existing wheels from the bucket..."
+          existing_files=$(aws s3 ls "${bucket_path}" --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }} | grep '\.whl$' | awk '{print $4}')
+
+          # Find local wheel files
+          mkdir -p dist/all
+          local_files=$(find dist/all -type f -name "*.whl" -exec basename {} \;)
+
+          # Merge existing files with local wheels
+          all_files=$(echo -e "${existing_files}\n${local_files}" | sort -u)
 
           # Prepare a new HTML file (temp file for atomic update)
           temp_html=$(mktemp)
           echo '<!DOCTYPE html><html><head><title>NautilusTrader Packages</title></head><body><h1>Links for nautilus-trader</h1>' > "${temp_html}"
 
-          # Update the index with local wheels and hashes
-          for file in $local_files; do
-            file_name=$(basename "$file")
-
-            # Calculate the hash for local files or skip if not possible
-            if [[ -f "$file" ]]; then
-              hash=$(sha256sum "$file" | awk '{print $1}')
-              echo "Calculated hash for $file_name: $hash"
+          # Add files to the index
+          for file in $all_files; do
+            # Check if we already have a hash for this file
+            if [[ -n "${existing_hashes[$file]}" ]]; then
+              hash="${existing_hashes[$file]}"
+              echo "Using existing hash for $file: $hash"
+            elif [[ -f "dist/all/$file" ]]; then
+              # Calculate hash for local files
+              hash=$(sha256sum "dist/all/$file" | awk '{print $1}')
+              echo "Calculated hash for $file: $hash"
             else
-              echo "Warning: $file_name is missing or inaccessible, skipping hash..."
+              echo "Warning: Could not find hash for $file"
               hash=""
             fi
 
-            # Add file to index
-            escaped_file=$(echo "$file_name" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g; s/'"'"'/\&#39;/g')
+            # Add file with hash (or without hash if unavailable) to the index
+            escaped_file=$(echo "$file" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g; s/'"'"'/\&#39;/g')
             if [[ -n "$hash" ]]; then
               echo "<a href=\"$escaped_file#sha256=$hash\">$escaped_file</a><br>" >> "${temp_html}"
             else
@@ -780,19 +795,20 @@ jobs:
       - name: Upload index.html to Cloudflare R2
         run: |
           for i in {1..3}; do
-              if aws s3 cp index.html "s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/index.html" \
-                  --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }} \
-                  --content-type "text/html; charset=utf-8"; then
-                  echo "Successfully uploaded index.html"
-                  break
-              else
-                  echo "Failed to upload index.html, retrying ($i/3)..."
-                  sleep 5
-              fi
+            if aws s3 cp index.html "s3://${{ env.CLOUDFLARE_R2_BUCKET_NAME }}/simple/nautilus-trader/index.html" \
+              --endpoint-url=${{ secrets.CLOUDFLARE_R2_URL }} \
+              --content-type "text/html; charset=utf-8"; then
+              echo "Successfully uploaded index.html"
+              break
+            else
+              echo "Failed to upload index.html, retrying ($i/3)..."
+              sleep 5
+            fi
           done
 
           if [ $i -eq 3 ]; then
-              echo "Failed to upload index.html after 3 attempts, skipping..."
+            echo "Failed to upload index.html after 3 attempts"
+            exit 1
           fi
 
       - name: Verify uploaded files in Cloudflare R2
