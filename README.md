@@ -26,6 +26,7 @@
 - **Support**: [support@nautilustrader.io](mailto:support@nautilustrader.io)
 
 ## Introduction
+## By Mudassir Alam
 
 NautilusTrader is an open-source, high-performance, production-grade algorithmic trading platform,
 providing quantitative traders with the ability to backtest portfolios of automated trading strategies
